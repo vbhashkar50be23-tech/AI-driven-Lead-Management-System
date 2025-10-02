@@ -1,0 +1,71 @@
+services:
+  db:
+    image: postgres:16
+    container_name: edl_db
+    environment:
+      POSTGRES_DB: edtech
+      POSTGRES_USER: edtech
+      POSTGRES_PASSWORD: edtech
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/pg-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: edl_redis
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    container_name: edl_api
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - .env
+    environment:
+      # Override DB/Redis for containers
+DATABASE_URL: postgresql+psycopg://edtech:edtech@db:5432/edtech
+      REDIS_URL: redis://redis:6379/0
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+    ports:
+      - "8000:8000"
+    command: ["sh", "-c", "alembic upgrade head && uvicorn backend.app.main:app --host 0.0.0.0 --port 8000"]
+
+  dashboard:
+    build: .
+    container_name: edl_dashboard
+    depends_on:
+      - api
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    command: ["streamlit", "run", "dashboard/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+
+  worker:
+    build: .
+    container_name: edl_worker
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    command: ["rq", "worker", "--url", "redis://redis:6379/0"]
+
+  rqdashboard:
+    build: .
+    container_name: edl_rqdashboard
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "9181:9181"
+    command: ["rq-dashboard", "-u", "redis://redis:6379/0", "--port", "9181", "--bind", "0.0.0.0"]
+
+volumes:
+  pgdata:
